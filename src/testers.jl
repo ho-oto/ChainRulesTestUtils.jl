@@ -126,9 +126,9 @@ function test_scalar(f, z; rtol=1e-9, atol=1e-9, fdm=_fdm, fkwargs=NamedTuple(),
         frule_test(f, (z, Δx); rtol=rtol, atol=atol, fdm=fdm, fkwargs=fkwargs, kwargs...)
         if z isa Complex
             # check that same tangent is produced for tangent 1.0 and 1.0 + 0.0im
-            @test isapprox(
-                frule((Zero(), real(Δx)), f, z; fkwargs...)[2],
-                frule((Zero(), Δx), f, z; fkwargs...)[2],
+            check_equal(
+                frule((Zero(), real(Δx)), f, z; fkwargs...)[2]::Number,
+                frule((Zero(), Δx), f, z; fkwargs...)[2]::Number,
                 rtol=rtol,
                 atol=atol,
                 kwargs...,
@@ -150,10 +150,10 @@ function test_scalar(f, z; rtol=1e-9, atol=1e-9, fdm=_fdm, fkwargs=NamedTuple(),
         rrule_test(f, Δu, (z, Δx); rtol=rtol, atol=atol, fdm=fdm, fkwargs=fkwargs, kwargs...)
         if Ω isa Complex
             # check that same cotangent is produced for cotangent 1.0 and 1.0 + 0.0im
-            back = rrule(f, z)[2]
-            @test isapprox(
-                extern(back(real(Δu))[2]),
-                extern(back(Δu)[2]),
+            _, back = rrule(f, z)
+            check_equal(
+                back(real(Δu))[2],
+                back(Δu)[2],
                 rtol=rtol,
                 atol=atol,
                 kwargs...,
@@ -185,21 +185,13 @@ function frule_test(f, xẋs::Tuple{Any, Any}...; rtol=1e-9, atol=1e-9, fdm=_fdm
     xs, ẋs = first.(xẋs), last.(xẋs)
     Ω_ad, dΩ_ad = frule((NO_FIELDS, ẋs...), f, xs...; fkwargs...)
     Ω = f(xs...; fkwargs...)
-    # if equality check fails, check approximate equality
-    # use collect so can do vector equality
-    # TODO: add isapprox replacement that works for more types
-    @test Ω_ad == Ω || isapprox(collect(Ω_ad), collect(Ω); rtol=rtol, atol=atol)
+    Ω_ad == Ω || isapprox(collect(Ω_ad), collect(Ω); rtol=rtol, atol=atol)
 
     ẋs_is_ignored = ẋs .== nothing
     # Correctness testing via finite differencing.
     dΩ_fd = _make_jvp_call(fdm, (xs...) -> f(xs...; fkwargs...), xs, ẋs, ẋs_is_ignored)
-    @test isapprox(
-        collect(extern.(dΩ_ad)),  # Use collect so can use vector equality
-        collect(dΩ_fd);
-        rtol=rtol,
-        atol=atol,
-        kwargs...
-    )
+    accumulant = rand_tangent(Ω)
+    check_result(accumulant, dΩ_ad, dΩ_fd; rtol=rtol, atol=atol, kwargs...)
 end
 
 
@@ -220,7 +212,7 @@ function rrule_test(f, ȳ, xx̄s::Tuple{Any, Any}...; rtol=1e-9, atol=1e-9, fdm
     _ensure_not_running_on_functor(f, "rrule_test")
 
     # Check correctness of evaluation.
-    xs, x̄s = collect(zip(xx̄s...))
+    xs, accumulated_x̄s = collect(zip(xx̄s...))
     y_ad, pullback = rrule(f, xs...; fkwargs...)
     y = f(xs...; fkwargs...)
     # if equality check fails, check approximate equality
@@ -234,22 +226,27 @@ function rrule_test(f, ȳ, xx̄s::Tuple{Any, Any}...; rtol=1e-9, atol=1e-9, fdm
     x̄s_ad = ∂s[2:end]
     @test ∂self === NO_FIELDS  # No internal fields
 
-    x̄s_is_dne = x̄s .== nothing
+    x̄s_is_dne = accumulated_x̄s .== nothing
     # Correctness testing via finite differencing.
     x̄s_fd = _make_j′vp_call(fdm, (xs...) -> f(xs...; fkwargs...), ȳ, xs, x̄s_is_dne)
-    for (x̄_ad, x̄_fd) in zip(x̄s_ad, x̄s_fd)
+    for (accumulated_x̄, x̄_ad, x̄_fd) in zip(accumulated_x̄s, x̄s_ad, x̄s_fd)
         if x̄_fd === nothing
             # The way we've structured the above, this tests the propagator is returning a DoesNotExist
             @test x̄_ad isa DoesNotExist
         else
-            @test isapprox(x̄_ad, x̄_fd; rtol=rtol, atol=atol, kwargs...)
+            check_result(accumulated_x̄, x̄_ad, x̄_fd; rtol=rtol, atol=atol, kwargs...)
         end
     end
 
-    if count(!, x̄s_is_dne) == 1
-        # for functions with pullbacks that only produce a single non-DNE adjoint, that
-        # single adjoint should not be `Thunk`ed. InplaceableThunk is fine.
-        i = findfirst(!, x̄s_is_dne)
-        @test !(isa(x̄s_ad[i], Thunk))
+    check_thunking_is_appropriate(x̄s_ad)
+end
+
+function check_thunking_is_appropriate(x̄s)
+    @testset "Don't thunk only non_zero argument" begin
+        num_zeros = count(x->x isa AbstractZero, x̄s)
+        num_thunks = count(x->x isa Thunk, x̄s)
+        if num_zeros + num_thunks == length(x̄s)
+            @test num_thunks !== 1
+        end
     end
 end

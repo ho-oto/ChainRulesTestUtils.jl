@@ -17,4 +17,3 @@ function Base.isapprox(
 end
 # Must be for same primal
 Base.isapprox(d_ad::Composite{P}, d_fd::Composite{Q}; kwargs...) where {P, Q} = false
-

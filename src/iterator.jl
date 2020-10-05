@@ -43,6 +43,14 @@ function Base.hash(iter::TestIterator{<:Any,IT,IS}) where {IT,IS}
     return mapreduce(hash, hash, (iter.data, IT, IS))
 end
 
+# To make it a valid differential: needs at very least `zero` and `+`
+Base.zero(::Type{<:TestIterator}) = Zero()
+function Base.:+(iter1::TestIterator{T,IS,IE}, iter2::TestIterator{T,IS,IE}) where {T,IS,IE}
+    return TestIterator{T,IS,IE}(map(+, iter1, iter2))
+end
+
+# For testing purposes:
+
 Base.isapprox(iter1::TestIterator, iter2::TestIterator) = false
 function Base.isapprox(
     iter1::TestIterator{T1,IS,IE},
@@ -50,6 +58,10 @@ function Base.isapprox(
     kwargs...,
 ) where {T1,T2,IS,IE}
     return isapprox(iter1.data, iter2.data; kwargs...)
+end
+
+function check_equal(expected::TestIterator, actual::TestIterator; kwargs...)
+    return isapprox(expected, actual; kwargs...)
 end
 
 function rand_tangent(rng::AbstractRNG, x::TestIterator{<:Any,IS,IE}) where {IS,IE}
