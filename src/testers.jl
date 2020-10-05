@@ -185,7 +185,7 @@ function frule_test(f, xẋs::Tuple{Any, Any}...; rtol=1e-9, atol=1e-9, fdm=_fdm
     xs, ẋs = first.(xẋs), last.(xẋs)
     Ω_ad, dΩ_ad = frule((NO_FIELDS, ẋs...), f, xs...; fkwargs...)
     Ω = f(xs...; fkwargs...)
-    Ω_ad == Ω || isapprox(collect(Ω_ad), collect(Ω); rtol=rtol, atol=atol)
+    @test Ω_ad == Ω || isapprox(collect(Ω_ad), collect(Ω); rtol=rtol, atol=atol)
 
     ẋs_is_ignored = ẋs .== nothing
     # Correctness testing via finite differencing.
